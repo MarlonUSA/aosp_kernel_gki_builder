@@ -272,6 +272,35 @@ jobs:
           fi
         fi
 
+    - name: Patch kernel to bypass driver signature (AndroidDriveSignity)
+      if: env.CHECK_FILE_IS_OK != 'true' || true
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        git clone --depth=1 https://github.com/MarlonUSA/AndroidDriveSignity.git
+
+        KERNEL_BIN=android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }}
+        if [ -f "$KERNEL_BIN" ]; then
+          # 从编译产物中提取 kallsyms
+          if [ -f android-kernel/out/System.map ]; then
+            cp android-kernel/out/System.map kallsyms_for_patch
+          else
+            # 从 vmlinux 导出
+            nm android-kernel/out/vmlinux 2>/dev/null | awk '{print $1, $2, $3}' > kallsyms_for_patch || true
+          fi
+
+          if [ -f kallsyms_for_patch ] && [ -s kallsyms_for_patch ]; then
+            echo "Patching kernel to disable module signature checks..."
+            python3 AndroidDriveSignity/AndroidDriveSignity.py "$KERNEL_BIN" kallsyms_for_patch "${KERNEL_BIN}.patched" || echo "Patch failed, using original kernel"
+            if [ -f "${KERNEL_BIN}.patched" ]; then
+              cp "${KERNEL_BIN}.patched" "$KERNEL_BIN"
+              echo "KERNEL_PATCHED=true" >> $GITHUB_ENV
+              echo "Kernel patched successfully — driver signature bypass enabled"
+            fi
+          else
+            echo "No kallsyms available, skipping patch"
+          fi
+        fi
+
     - name: Build rwProcMem33 kernel module
       if: always()
       run: |
