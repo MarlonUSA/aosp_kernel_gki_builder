@@ -190,6 +190,7 @@ jobs:
 
   package:
     needs: build
+    if: always()
     runs-on: ubuntu-latest
     name: "Package Loader"
     permissions:
