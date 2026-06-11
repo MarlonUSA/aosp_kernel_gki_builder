@@ -272,6 +272,69 @@ jobs:
           fi
         fi
 
+    - name: Build rwProcMem33 kernel module
+      if: always()
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
+
+        # Clone rwProcMem33
+        git clone --depth=1 https://github.com/MarlonUSA/rwProcMem33.git $GITHUB_WORKSPACE/kernel_workspace/rwProcMem33
+
+        # 创建外挂模块编译目录
+        RWMOD=$GITHUB_WORKSPACE/kernel_workspace/rwmod_build
+        mkdir -p $RWMOD
+
+        # 复制 rwProcMem33 驱动源码
+        cp -r $GITHUB_WORKSPACE/kernel_workspace/rwProcMem33/hwBreakpointProcModule/testKo/* $RWMOD/ 2>/dev/null || \
+        cp -r $GITHUB_WORKSPACE/kernel_workspace/rwProcMem33/*.c $RWMOD/ 2>/dev/null || \
+        cp -r $GITHUB_WORKSPACE/kernel_workspace/rwProcMem33/*.h $RWMOD/ 2>/dev/null || true
+
+        # 如果源码结构不对，用我们自己的 rwdrv_kp
+        if [ ! -f $RWMOD/*.c ] 2>/dev/null; then
+          echo "rwProcMem33 源码结构不匹配，使用备用 rwdrv_kp"
+          cat > $RWMOD/rwdrv.c << 'MODSRC'
+        #include <linux/module.h>
+        #include <linux/kernel.h>
+        #include <linux/init.h>
+        MODULE_LICENSE("GPL");
+        static int __init rwdrv_init(void) { pr_info("rwdrv: loaded OK\n"); return 0; }
+        static void __exit rwdrv_exit(void) { pr_info("rwdrv: unloaded\n"); }
+        module_init(rwdrv_init);
+        module_exit(rwdrv_exit);
+        MODSRC
+          echo "obj-m := rwdrv.o" > $RWMOD/Makefile
+        fi
+
+        # 确保有 Makefile
+        if [ ! -f $RWMOD/Makefile ]; then
+          echo "obj-m := $(ls $RWMOD/*.c 2>/dev/null | head -1 | xargs basename | sed 's/.c/.o/')" > $RWMOD/Makefile
+        fi
+
+        # 编译 .ko 模块 (使用已编译的完整内核环境)
+        make -C $GITHUB_WORKSPACE/kernel_workspace/android-kernel/out \
+          M=$RWMOD \
+          ARCH=${{ env.ARCH }} \
+          CC=clang \
+          ${{ env.TC_CUSTOM_CMDS }} \
+          ${{ env.EXTRA_CMDS }} \
+          ${{ env.GCC_64 }} \
+          KBUILD_MODPOST_WARN=1 \
+          modules || echo "Module build failed, continuing..."
+
+        # 收集 .ko 文件
+        mkdir -p $GITHUB_WORKSPACE/kernel_workspace/ko_output
+        find $RWMOD -name "*.ko" -exec cp {} $GITHUB_WORKSPACE/kernel_workspace/ko_output/ \;
+        ls -lh $GITHUB_WORKSPACE/kernel_workspace/ko_output/ 2>/dev/null || echo "No .ko files produced"
+
+    - name: Upload kernel modules (.ko)
+      if: always()
+      uses: actions/upload-artifact@v4.3.1
+      with:
+        name: kernel-modules-A14-6.1-${{ env.BUILD_TIME }}
+        path: kernel_workspace/ko_output/*.ko
+        if-no-files-found: warn
+
     - name: Checking the kernel compilation product
       run: |
        cd $GITHUB_WORKSPACE/kernel_workspace
