@@ -36,6 +36,12 @@ jobs:
             config: "gki_defconfig"
             tag: "android16-6.12"
             repo: "https://android.googlesource.com/kernel/common"
+          # ===== GKI 5.4 (Android 11) =====
+          - version: "5.4-gki"
+            branch: "android11-5.4"
+            config: "gki_defconfig"
+            tag: "android11-5.4"
+            repo: "https://android.googlesource.com/kernel/common"
           # ===== CAF 骁龙专属 (Qualcomm CodeLinaro) =====
           - version: "6.1-sm8650"
             branch: "kernel.lnx.6.1.r24-rel"
@@ -96,16 +102,30 @@ jobs:
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
 
+        # 有些仓库 defconfig 路径不同
+        if [ -f arch/arm64/configs/${{ matrix.config }} ]; then
+          DEFCONFIG=${{ matrix.config }}
+        elif [ -f arch/arm64/configs/gki_defconfig ]; then
+          DEFCONFIG=gki_defconfig
+        else
+          DEFCONFIG=defconfig
+        fi
+
         make ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          ${{ matrix.config }} 2>&1 | tail -2
+          $DEFCONFIG 2>&1 | tail -2
 
         scripts/config --enable CONFIG_MODULES
         scripts/config --enable CONFIG_MODULE_UNLOAD
         scripts/config --enable CONFIG_KPROBES
         scripts/config --disable CONFIG_TRIM_UNUSED_KSYMS
+        # 禁用 LTO 加速编译 (避免超时)
+        scripts/config --disable CONFIG_LTO_CLANG
+        scripts/config --disable CONFIG_LTO_CLANG_THIN
+        scripts/config --disable CONFIG_LTO_CLANG_FULL
+        scripts/config --set-val CONFIG_LTO_NONE y 2>/dev/null || true
         touch abi_symbollist.raw
 
         make ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
