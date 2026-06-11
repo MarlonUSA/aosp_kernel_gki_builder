@@ -77,7 +77,7 @@ jobs:
         sudo apt update
         sudo apt install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 rename libelf-dev dwarves
         sudo apt list --upgradable
-        sudo apt upgrade
+        sudo apt upgrade -y
         mkdir -p $GITHUB_WORKSPACE/kernel_workspace
 
     - name: Set Swap to 10GB
@@ -273,7 +273,6 @@ jobs:
         fi
 
     - name: Patch kernel to bypass driver signature (AndroidDriveSignity)
-      if: env.CHECK_FILE_IS_OK != 'true' || true
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone --depth=1 https://github.com/MarlonUSA/AndroidDriveSignity.git
@@ -301,8 +300,7 @@ jobs:
           fi
         fi
 
-    - name: Build rwProcMem33 kernel module
-      if: always()
+    - name: Build TearGame kernel module
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
@@ -366,7 +364,6 @@ jobs:
         ls -lh $GITHUB_WORKSPACE/kernel_workspace/ko_output/ 2>/dev/null || echo "No .ko files produced"
 
     - name: Upload kernel modules (.ko)
-      if: always()
       uses: actions/upload-artifact@v4.3.1
       with:
         name: TearGame-driver-A14-6.1-${{ env.BUILD_TIME }}
