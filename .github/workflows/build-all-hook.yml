@@ -160,7 +160,7 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           olddefconfig 2>&1 | tail -1
 
-    - name: Build full kernel (Image + modules)
+    - name: Build modules_prepare (skip Image to save disk)
       run: |
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
@@ -174,9 +174,10 @@ jobs:
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          Image modules -j$(nproc) 2>&1 | tail -5
+          modules_prepare -j$(nproc) 2>&1 | tail -5
 
-        echo "Module.symvers: $(wc -l < Module.symvers 2>/dev/null || echo 0) symbols"
+        echo "Disk after modules_prepare:"
+        df -h / | tail -1
 
     - name: Clone TearGame driver
       run: |
