@@ -174,9 +174,11 @@ jobs:
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          modules_prepare -j$(nproc) 2>&1 | tail -5
+          modules -j$(nproc) 2>&1 | tail -5
 
-        echo "Disk after modules_prepare:"
+        # 编完删 .o 省空间给 .ko 编译
+        find . -name "*.o" -not -path "*/scripts/*" -delete 2>/dev/null || true
+        echo "Disk after modules:"
         df -h / | tail -1
 
     - name: Clone TearGame driver
