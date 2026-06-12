@@ -1,4 +1,4 @@
-name: "Build 6.12 GKI (Android 16)"
+name: "Build 6.12 GKI (Android 16 - Bazel)"
 on:
   workflow_dispatch:
 
@@ -23,68 +23,82 @@ jobs:
         sudo swapon /swapfile
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache 2>/dev/null
         sudo docker image prune --all -f 2>/dev/null || true
+        df -h /
         sudo apt-get update -qq
         sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
-          git curl ccache zip unzip python3 cpio kmod dwarves libncurses-dev lld clang || true
+          git curl python3 cpio kmod dwarves libncurses-dev repo rsync || true
         mkdir -p $GITHUB_WORKSPACE/build
 
-    - name: Download kernel source
+    - name: Download kernel source with repo
       run: |
         cd $GITHUB_WORKSPACE/build
-        git clone --depth=1 --branch android16-6.12 \
-          https://android.googlesource.com/kernel/common kernel_src 2>&1 | tail -3
+        mkdir kernel && cd kernel
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android16-6.12 --depth=1 2>&1 | tail -5
+        repo sync -c -j$(nproc) --no-tags 2>&1 | tail -10
+        ls -la
 
-    - name: Download Clang 20
+    - name: Build kernel with Bazel
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel
+        # 6.12 内核用 tools/bazel 构建
+        if [ -f tools/bazel ]; then
+          echo "Using Bazel (Kleaf)"
+          tools/bazel run //common:kernel_aarch64_dist -- --dist_dir=$GITHUB_WORKSPACE/build/dist 2>&1 | tail -20
+        else
+          echo "No bazel found, trying build.sh"
+          BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh 2>&1 | tail -20 || true
+        fi
+
+        echo "=== dist output ==="
+        ls -lh $GITHUB_WORKSPACE/build/dist/ 2>/dev/null || echo "No dist"
+        ls $GITHUB_WORKSPACE/build/dist/*.ko 2>/dev/null | head -5 || echo "No .ko in dist"
+
+    - name: Build TearGame module
       run: |
         cd $GITHUB_WORKSPACE/build
-        mkdir -p clang
-        curl -sL "https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20241217-release/Clang-20.0.0git-20241217.tar.gz" \
-          | tar xz -C clang
-        echo "Clang: $(clang/bin/clang --version | head -1)"
+        DIST=$GITHUB_WORKSPACE/build/dist
 
-    - name: Configure kernel
-      run: |
-        cd $GITHUB_WORKSPACE/build/kernel_src
-        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
+        # 检查是否有 Module.symvers
+        ls -la $DIST/Module.symvers 2>/dev/null || echo "No Module.symvers in dist"
 
-        make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-          gki_defconfig 2>&1 | tail -2
+        # 找内核源码目录
+        KSRC=$(find $GITHUB_WORKSPACE/build/kernel -maxdepth 2 -name "Makefile" -path "*/common/Makefile" | head -1 | xargs dirname)
+        echo "Kernel source: $KSRC"
 
-        scripts/config --enable CONFIG_MODULES
-        scripts/config --enable CONFIG_MODULE_UNLOAD
-        scripts/config --enable CONFIG_KPROBES
-        scripts/config --disable CONFIG_TRIM_UNUSED_KSYMS
-        touch abi_symbollist.raw
-
-        make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-          olddefconfig 2>&1 | tail -1
-
-    - name: Build full kernel
-      run: |
-        cd $GITHUB_WORKSPACE/build/kernel_src
-        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
-        make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-          Image modules -j$(nproc) 2>&1 | tail -10
-
-    - name: Clone and build TearGame .ko
-      run: |
-        cd $GITHUB_WORKSPACE/build/kernel_src
-        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
-        git clone --depth=1 https://github.com/MarlonUSA/TearGame_KernelDriver_Android_WriteReadMemory.git \
-          $GITHUB_WORKSPACE/build/TearGame
+        # Clone TearGame
+        git clone --depth=1 https://github.com/MarlonUSA/TearGame_KernelDriver_Android_WriteReadMemory.git TearGame
         MODDIR=$GITHUB_WORKSPACE/build/teargame_mod
         mkdir -p $MODDIR
-        cp $GITHUB_WORKSPACE/build/TearGame/dev/*.c $MODDIR/
-        cp $GITHUB_WORKSPACE/build/TearGame/dev/*.h $MODDIR/
+        cp TearGame/dev/*.c $MODDIR/
+        cp TearGame/dev/*.h $MODDIR/
         echo "obj-m := usa_drv.o" > $MODDIR/Makefile
         echo "usa_drv-objs := entry.o memory.o process.o" >> $MODDIR/Makefile
-        echo "Source files:" && ls $MODDIR/
-        make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
-          ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-          KBUILD_MODPOST_WARN=1 modules 2>&1 | tail -8
+
+        # 尝试用 dist 里的 headers 编译模块
+        if [ -d "$DIST" ] && [ -f "$DIST/Module.symvers" ]; then
+          echo "Building module against dist output..."
+          # 复制 Module.symvers 到内核源码
+          cp $DIST/Module.symvers $KSRC/ 2>/dev/null || true
+
+          export PATH=$(find $GITHUB_WORKSPACE/build/kernel -path "*/clang/bin" -type d | head -1):$PATH
+
+          make -C $KSRC M=$MODDIR \
+            ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            KBUILD_MODPOST_WARN=1 modules 2>&1 | tail -10
+        else
+          echo "Dist not available, trying direct build..."
+          # 备选: 用系统 clang
+          if [ -n "$KSRC" ]; then
+            export PATH=$(find $GITHUB_WORKSPACE/build/kernel -path "*/clang/bin" -type d | head -1):$PATH 2>/dev/null
+            make -C $KSRC M=$MODDIR \
+              ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+              KBUILD_MODPOST_WARN=1 modules 2>&1 | tail -10 || echo "Direct build failed"
+          fi
+        fi
+
         mkdir -p $GITHUB_WORKSPACE/build/output
         find $MODDIR -name "*.ko" -exec cp {} $GITHUB_WORKSPACE/build/output/TearGame_6.12-gki.ko \;
-        ls -lh $GITHUB_WORKSPACE/build/output/ || echo "No .ko"
+        ls -lh $GITHUB_WORKSPACE/build/output/ 2>/dev/null || echo "No .ko produced"
 
     - name: Upload .ko
       uses: actions/upload-artifact@v4
