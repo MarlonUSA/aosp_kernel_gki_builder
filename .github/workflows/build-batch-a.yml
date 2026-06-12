@@ -16,16 +16,19 @@ jobs:
             config: "gki_defconfig"
             tag: "android11-5.4"
             repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
           - version: "5.10-gki"
             branch: "android12-5.10"
             config: "gki_defconfig"
             tag: "android12-5.10"
             repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
           - version: "5.15-gki"
             branch: "android13-5.15"
             config: "gki_defconfig"
             tag: "android13-5.15"
             repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz"
 
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -61,8 +64,7 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/build
         mkdir -p clang
-        curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz" \
-          | tar xz -C clang
+        curl -sL "${{ matrix.clang_url }}" | tar xz -C clang
         echo "Clang: $(clang/bin/clang --version | head -1)"
 
     - name: Configure kernel
