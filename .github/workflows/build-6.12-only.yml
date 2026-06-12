@@ -58,7 +58,7 @@ jobs:
         scripts/config --enable CONFIG_MODULE_UNLOAD
         scripts/config --enable CONFIG_KPROBES
         scripts/config --disable CONFIG_TRIM_UNUSED_KSYMS
-        scripts/config --disable CONFIG_DEBUG_INFO_BTF
+        # BTF 保持开启 (影响 struct module 布局/CRC)
         touch abi_symbollist.raw
 
         make $MAKE_ARGS olddefconfig 2>&1 | tail -2
