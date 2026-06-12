@@ -116,20 +116,13 @@ jobs:
           $GITHUB_WORKSPACE/build/TearGame
         MODDIR=$GITHUB_WORKSPACE/build/teargame_mod
         mkdir -p $MODDIR
-        find $GITHUB_WORKSPACE/build/TearGame -name "*.c" -exec cp {} $MODDIR/ \; 2>/dev/null
-        find $GITHUB_WORKSPACE/build/TearGame -name "*.h" -exec cp {} $MODDIR/ \; 2>/dev/null
-        find $GITHUB_WORKSPACE/build/TearGame -name "Makefile" -exec cp {} $MODDIR/ \; 2>/dev/null
-        if ! ls $MODDIR/*.c 1>/dev/null 2>&1; then
-          cat > $MODDIR/rwdrv.c << 'EOF'
-        #include <linux/module.h>
-        MODULE_LICENSE("GPL");
-        static int __init rwdrv_init(void){pr_info("rwdrv:loaded\n");return 0;}
-        static void __exit rwdrv_exit(void){pr_info("rwdrv:unloaded\n");}
-        module_init(rwdrv_init);module_exit(rwdrv_exit);
-        EOF
-          echo "obj-m := rwdrv.o" > $MODDIR/Makefile
-        fi
-        [ ! -f $MODDIR/Makefile ] && echo "obj-m := $(ls $MODDIR/*.c|head -1|xargs basename|sed 's/.c/.o/')" > $MODDIR/Makefile
+        cp $GITHUB_WORKSPACE/build/TearGame/dev/*.c $MODDIR/
+        cp $GITHUB_WORKSPACE/build/TearGame/dev/*.h $MODDIR/
+        cat > $MODDIR/Makefile << 'MKEOF'
+obj-m := usa_drv.o
+usa_drv-objs := entry.o memory.o process.o
+MKEOF
+        echo "Source files:" && ls $MODDIR/
         make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
           ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \

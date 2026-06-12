@@ -169,42 +169,32 @@ jobs:
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
 
         MODDIR=$GITHUB_WORKSPACE/build/teargame_mod
+        TEAR=$GITHUB_WORKSPACE/build/TearGame
         mkdir -p $MODDIR
 
-        # Copy TearGame source files
-        find $GITHUB_WORKSPACE/build/TearGame -name "*.c" -exec cp {} $MODDIR/ \; 2>/dev/null
-        find $GITHUB_WORKSPACE/build/TearGame -name "*.h" -exec cp {} $MODDIR/ \; 2>/dev/null
-        find $GITHUB_WORKSPACE/build/TearGame -name "Makefile" -exec cp {} $MODDIR/ \; 2>/dev/null
-
-        # Fallback minimal module if TearGame source not found
-        if ! ls $MODDIR/*.c 1>/dev/null 2>&1; then
-          echo "TearGame source not found, using minimal module"
-          cat > $MODDIR/rwdrv.c << 'EOF'
-        #include <linux/module.h>
-        #include <linux/kernel.h>
-        MODULE_LICENSE("GPL");
-        static int __init rwdrv_init(void) { pr_info("rwdrv: loaded\n"); return 0; }
-        static void __exit rwdrv_exit(void) { pr_info("rwdrv: unloaded\n"); }
-        module_init(rwdrv_init);
-        module_exit(rwdrv_exit);
-        EOF
-          echo "obj-m := rwdrv.o" > $MODDIR/Makefile
+        # 用明确的英文路径复制 dev 版源码
+        if [ -d "$TEAR/dev" ]; then
+          echo "Using dev/ directory"
+          cp $TEAR/dev/*.c $MODDIR/ 2>/dev/null
+          cp $TEAR/dev/*.h $MODDIR/ 2>/dev/null
         fi
 
-        if [ ! -f $MODDIR/Makefile ]; then
-          FIRST_C=$(ls $MODDIR/*.c 2>/dev/null | head -1 | xargs basename | sed 's/.c/.o/')
-          echo "obj-m := $FIRST_C" > $MODDIR/Makefile
-        fi
+        # 检查
+        echo "Source files:"
+        ls $MODDIR/*.c 2>/dev/null || echo "No .c files!"
 
-        echo "Module source files:"
-        ls -la $MODDIR/
+        # 写 Makefile (多文件编译)
+        cat > $MODDIR/Makefile << 'MKEOF'
+obj-m := usa_drv.o
+usa_drv-objs := entry.o memory.o process.o
+MKEOF
 
         make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
           ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KBUILD_MODPOST_WARN=1 modules 2>&1 | tail -5
+          KBUILD_MODPOST_WARN=1 modules 2>&1 | tail -8
 
         # Collect output
         mkdir -p $GITHUB_WORKSPACE/build/output
