@@ -1,0 +1,383 @@
+name: "🔒 Build HOOK Driver (All Versions)"
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ===== GKI (Google) — 每个版本配匹配的 Clang =====
+          - version: "5.4-gki"
+            branch: "android11-5.4"
+            config: "gki_defconfig"
+            tag: "android11-5.4"
+            repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+          - version: "5.10-gki"
+            branch: "android12-5.10"
+            config: "gki_defconfig"
+            tag: "android12-5.10"
+            repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+          - version: "5.15-gki"
+            branch: "android13-5.15"
+            config: "gki_defconfig"
+            tag: "android13-5.15"
+            repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz"
+          - version: "6.1-gki"
+            branch: "android14-6.1"
+            config: "gki_defconfig"
+            tag: "android14-6.1"
+            repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz"
+          - version: "6.6-gki"
+            branch: "android15-6.6"
+            config: "gki_defconfig"
+            tag: "android15-6.6"
+            repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz"
+          - version: "6.12-gki"
+            branch: "android16-6.12"
+            config: "gki_defconfig"
+            tag: "android16-6.12"
+            repo: "https://android.googlesource.com/kernel/common"
+            clang_url: "https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20241217-release/Clang-20.0.0git-20241217.tar.gz"
+          # ===== CAF 骁龙专属 =====
+          - version: "6.1-sm8650"
+            branch: "kernel.lnx.6.1.r24-rel"
+            config: "gki_defconfig"
+            tag: "CAF-SM8650-8Gen3"
+            repo: "https://git.codelinaro.org/clo/la/kernel/qcom.git"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz"
+          - version: "5.15-sm8550"
+            branch: "kernel.lnx.5.15.r1-rel"
+            config: "gki_defconfig"
+            tag: "CAF-SM8550-8Gen2"
+            repo: "https://git.codelinaro.org/clo/la/kernel/msm-5.15.git"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz"
+          - version: "5.10-sm8450"
+            branch: "kernel.lnx.5.10.r1-rel"
+            config: "gki_defconfig"
+            tag: "CAF-SM8450-8Gen1"
+            repo: "https://git.codelinaro.org/clo/la/kernel/msm-5.10.git"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+          - version: "5.4-sm8350"
+            branch: "kernel.lnx.5.4.r1-rel"
+            config: "vendor/lahaina-qgki_defconfig"
+            tag: "CAF-SM8350-888"
+            repo: "https://git.codelinaro.org/clo/la/kernel/msm-5.4.git"
+            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    name: "Build ${{ matrix.tag }}"
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup environment
+      run: |
+        # 增加 swap 防止编译内存不足
+        sudo swapoff -a
+        sudo fallocate -l 16G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+          git curl ccache zip unzip python3 cpio kmod dwarves libncurses-dev || true
+        mkdir -p $GITHUB_WORKSPACE/build
+
+    - name: Download kernel source
+      run: |
+        cd $GITHUB_WORKSPACE/build
+        echo "Cloning kernel ${{ matrix.tag }} from ${{ matrix.repo }}..."
+        git clone --depth=1 --branch ${{ matrix.branch }} \
+          ${{ matrix.repo }} kernel_src 2>&1 | tail -3
+        if [ ! -d kernel_src ]; then
+          echo "Clone failed, trying alternate branch name..."
+          git clone --depth=1 ${{ matrix.repo }} kernel_src 2>&1 | tail -3
+        fi
+
+    - name: Download Android Clang
+      run: |
+        cd $GITHUB_WORKSPACE/build
+        mkdir -p clang
+        curl -sL "${{ matrix.clang_url }}" | tar xz -C clang
+        echo "Clang: $(clang/bin/clang --version | head -1)"
+
+    - name: Configure kernel
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel_src
+        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
+
+        # 有些仓库 defconfig 路径不同
+        if [ -f arch/arm64/configs/${{ matrix.config }} ]; then
+          DEFCONFIG=${{ matrix.config }}
+        elif [ -f arch/arm64/configs/gki_defconfig ]; then
+          DEFCONFIG=gki_defconfig
+        else
+          DEFCONFIG=defconfig
+        fi
+
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
+          CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+          OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          $DEFCONFIG 2>&1 | tail -2
+
+        scripts/config --enable CONFIG_MODULES
+        scripts/config --enable CONFIG_MODULE_UNLOAD
+        scripts/config --enable CONFIG_KPROBES
+        scripts/config --disable CONFIG_TRIM_UNUSED_KSYMS
+        touch abi_symbollist.raw
+
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
+          CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+          OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          olddefconfig 2>&1 | tail -1
+
+    - name: Build full kernel (Image + modules)
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel_src
+        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
+
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
+          CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+          OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          Image modules -j$(nproc) 2>&1 | tail -5
+
+        echo "Module.symvers: $(wc -l < Module.symvers 2>/dev/null || echo 0) symbols"
+
+    - name: Clone TearGame driver
+      run: |
+        git clone --depth=1 https://github.com/MarlonUSA/TearGame_KernelDriver_Android_WriteReadMemory.git \
+          $GITHUB_WORKSPACE/build/TearGame
+
+    - name: Build TearGame .ko
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel_src
+        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
+
+        MODDIR=$GITHUB_WORKSPACE/build/teargame_mod
+        TEAR=$GITHUB_WORKSPACE/build/TearGame
+        mkdir -p $MODDIR
+
+        # hook 版源码
+        cp $TEAR/hook/*.c $MODDIR/ 2>/dev/null
+        cp $TEAR/hook/*.h $MODDIR/ 2>/dev/null
+        echo "Source files:" && ls $MODDIR/
+        echo "obj-m := usa_hook.o" > $MODDIR/Makefile
+        echo "usa_hook-objs := entry.o memory.o process.o" >> $MODDIR/Makefile
+
+        make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
+          ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
+          CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+          OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          KBUILD_MODPOST_WARN=1 modules 2>&1 | tail -8
+
+        # Collect output
+        mkdir -p $GITHUB_WORKSPACE/build/output
+        find $MODDIR -name "*.ko" -exec cp {} $GITHUB_WORKSPACE/build/output/USAHook_${{ matrix.version }}.ko \;
+        ls -lh $GITHUB_WORKSPACE/build/output/ || echo "No .ko produced"
+
+    - name: Upload .ko
+      uses: actions/upload-artifact@v4
+      with:
+        name: USAHook-${{ matrix.version }}
+        path: build/output/*.ko
+        if-no-files-found: warn
+        retention-days: 30
+
+  package:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    name: "Package Loader"
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download all .ko artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ko_files
+        merge-multiple: true
+
+    - name: List all .ko files
+      run: |
+        echo "=== All compiled .ko files ==="
+        find ko_files -name "*.ko" -exec ls -lh {} \;
+
+    - name: Build loader and package .sh
+      run: |
+        sudo apt-get install -y -qq gcc-aarch64-linux-gnu || true
+
+        # Create loader source
+        cat > loader.c << 'LOADERSRC'
+        #include <stdio.h>
+        #include <stdlib.h>
+        #include <string.h>
+        #include <unistd.h>
+        #include <fcntl.h>
+        #include <sys/utsname.h>
+        #include <sys/syscall.h>
+
+        #define __NR_finit_module 273
+        #define __NR_init_module 105
+        #define IGNORE_FLAGS 3
+
+        struct ko_entry { const char *ver; const char *path; };
+
+        int main(int argc, char *argv[]) {
+            struct utsname u;
+            uname(&u);
+            char kver[32];
+            int major, minor;
+            sscanf(u.release, "%d.%d", &major, &minor);
+            snprintf(kver, sizeof(kver), "%d.%d", major, minor);
+
+            printf("TearGame Driver Loader\n");
+            printf("Kernel: %s (%s)\n", u.release, kver);
+
+            // Try loading from /data/local/tmp/TearGame_X.X.ko
+            char path[256];
+            snprintf(path, sizeof(path), "/data/local/tmp/TearGame_%s.ko", kver);
+
+            if (access(path, R_OK) != 0) {
+                // Try without version
+                snprintf(path, sizeof(path), "/data/local/tmp/TearGame.ko");
+            }
+
+            if (access(path, R_OK) != 0) {
+                printf("No matching .ko found for kernel %s\n", kver);
+                printf("Place TearGame_%s.ko in /data/local/tmp/\n", kver);
+                return 1;
+            }
+
+            printf("Loading: %s\n", path);
+
+            // Try init_module
+            FILE *f = fopen(path, "rb");
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                long sz = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                void *buf = malloc(sz);
+                fread(buf, 1, sz, f);
+                fclose(f);
+
+                if (syscall(__NR_init_module, buf, sz, "") == 0) {
+                    printf("Loaded OK (init_module)\n");
+                    free(buf);
+                    return 0;
+                }
+                free(buf);
+            }
+
+            // Try finit_module with IGNORE flags
+            int fd = open(path, O_RDONLY);
+            if (fd >= 0) {
+                if (syscall(__NR_finit_module, fd, "", IGNORE_FLAGS) == 0) {
+                    printf("Loaded OK (finit_module)\n");
+                    close(fd);
+                    return 0;
+                }
+                close(fd);
+            }
+
+            // Try insmod
+            char cmd[512];
+            snprintf(cmd, sizeof(cmd), "insmod '%s' 2>/dev/null", path);
+            if (system(cmd) == 0) {
+                printf("Loaded OK (insmod)\n");
+                return 0;
+            }
+
+            printf("Failed to load. Try: setenforce 0 first\n");
+            return 1;
+        }
+        LOADERSRC
+
+        aarch64-linux-gnu-gcc -static -O2 -o loader loader.c
+
+        # Create self-extracting .sh
+        cat > teargame_header.sh << 'SHEOF'
+        #!/system/bin/sh
+        # TearGame Kernel Driver — supports Android 12~16 (kernel 5.10~6.12)
+        # Usage: su -c "sh teargame.sh"
+        T="${TMPDIR:-/data/local/tmp}"
+        L="$T/.tg_loader"
+        # Detect kernel version
+        K=$(uname -r | cut -d. -f1-2)
+        echo "[TearGame] Kernel: $(uname -r) ($K)"
+        # Extract loader
+        SKIP=$(awk '/^__PAYLOAD__$/{print NR+1;exit}' "$0")
+        tail -n +$SKIP "$0" | head -1 | base64 -d | gunzip > "$L" 2>/dev/null
+        chmod 755 "$L" 2>/dev/null
+        # Extract matching .ko
+        KO="$T/TearGame_${K}.ko"
+        KOLINE=$((SKIP + 1))
+        for i in 5.10 5.15 6.1 6.6 6.12; do
+            if [ "$K" = "$i" ]; then
+                sed -n "${KOLINE}p" "$0" | base64 -d | gunzip > "$KO" 2>/dev/null
+                break
+            fi
+            KOLINE=$((KOLINE + 1))
+        done
+        if [ ! -f "$KO" ] || [ ! -s "$KO" ]; then
+            echo "[TearGame] No .ko for kernel $K"
+            rm -f "$L"
+            exit 1
+        fi
+        setenforce 0 2>/dev/null
+        "$L"
+        rm -f "$L"
+        exit $?
+        __PAYLOAD__
+        SHEOF
+
+        # Encode loader
+        gzip -c loader | base64 -w0 >> teargame_header.sh
+        echo "" >> teargame_header.sh
+
+        # Encode each .ko (5.10, 5.15, 6.1, 6.6, 6.12)
+        for v in 5.10 5.15 6.1 6.6 6.12; do
+            KO=$(find ko_files -name "TearGame_${v}.ko" 2>/dev/null | head -1)
+            if [ -f "$KO" ]; then
+                gzip -c "$KO" | base64 -w0 >> teargame_header.sh
+                echo "[+] Embedded $v ($(ls -lh "$KO" | awk '{print $5}'))"
+            else
+                echo "" >> teargame_header.sh
+                echo "[-] No .ko for $v"
+            fi
+            echo "" >> teargame_header.sh
+        done
+
+        chmod +x teargame_header.sh
+        echo ""
+        echo "=== Final package ==="
+        ls -lh teargame_header.sh
+        mv teargame_header.sh teargame.sh
+
+    - name: Upload teargame.sh
+      uses: actions/upload-artifact@v4
+      with:
+        name: teargame-all-versions
+        path: teargame.sh
+
+    - name: Upload individual .ko files
+      uses: actions/upload-artifact@v4
+      with:
+        name: all-ko-files
+        path: ko_files/
