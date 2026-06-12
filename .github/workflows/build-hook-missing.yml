@@ -51,7 +51,7 @@ jobs:
         df -h / | tail -1
 
         sudo swapoff -a
-        sudo fallocate -l 4G /swapfile
+        sudo fallocate -l 8G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
@@ -110,12 +110,12 @@ jobs:
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
 
-        # 编内核
+        # 编内核 (用 -j2 避免 OOM)
         make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          Image modules -j$(nproc) 2>&1 | tail -5
+          Image modules -j2 2>&1 | tail -5
 
         # 编完删内核对象文件省空间
         find . -name "*.o" -not -path "*/scripts/*" -delete 2>/dev/null || true
