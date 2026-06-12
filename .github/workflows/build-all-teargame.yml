@@ -83,16 +83,22 @@ jobs:
 
     - name: Setup environment
       run: |
-        # 增加 swap 防止编译内存不足
+        # 释放磁盘
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost 2>/dev/null || true
+        sudo rm -rf /usr/share/swift /usr/local/.ghcup /opt/hostedtoolcache 2>/dev/null || true
+        sudo rm -rf /usr/local/graalvm /usr/local/share/powershell /usr/local/share/chromium 2>/dev/null || true
+        sudo rm -rf /opt/microsoft /opt/pipx /usr/share/gradle* /usr/share/sbt 2>/dev/null || true
+        sudo docker image prune --all --force 2>/dev/null || true
+
         sudo swapoff -a
-        sudo fallocate -l 16G /swapfile
+        sudo fallocate -l 4G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
 
         sudo apt-get update -qq
         sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
-          git curl ccache zip unzip python3 cpio kmod dwarves libncurses-dev || true
+          git curl ccache zip unzip python3 cpio kmod dwarves libncurses-dev libdw-dev || true
         mkdir -p $GITHUB_WORKSPACE/build
 
     - name: Download kernel source
@@ -127,7 +133,12 @@ jobs:
           DEFCONFIG=defconfig
         fi
 
-        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
+        HOSTCC_ARGS="HOSTCC=gcc HOSTCXX=g++"
+        if echo "${{ matrix.version }}" | grep -q "6.12"; then
+          HOSTCC_ARGS=""
+        fi
+
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 $HOSTCC_ARGS \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
@@ -139,22 +150,27 @@ jobs:
         scripts/config --disable CONFIG_TRIM_UNUSED_KSYMS
         touch abi_symbollist.raw
 
-        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 $HOSTCC_ARGS \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
           olddefconfig 2>&1 | tail -1
 
-    - name: Build full kernel (Image + modules)
+    - name: Build modules_prepare
       run: |
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
 
-        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
+        HOSTCC_ARGS="HOSTCC=gcc HOSTCXX=g++"
+        if echo "${{ matrix.version }}" | grep -q "6.12"; then
+          HOSTCC_ARGS=""
+        fi
+
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 $HOSTCC_ARGS \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          Image modules -j$(nproc) 2>&1 | tail -5
+          modules_prepare -j$(nproc) 2>&1 | tail -5
 
         echo "Module.symvers: $(wc -l < Module.symvers 2>/dev/null || echo 0) symbols"
 
@@ -187,8 +203,13 @@ jobs:
         echo "obj-m := usa_drv.o" > $MODDIR/Makefile
         echo "usa_drv-objs := entry.o memory.o process.o" >> $MODDIR/Makefile
 
+        HOSTCC_ARGS="HOSTCC=gcc HOSTCXX=g++"
+        if echo "${{ matrix.version }}" | grep -q "6.12"; then
+          HOSTCC_ARGS=""
+        fi
+
         make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
-          ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
+          ARCH=arm64 LLVM=1 LLVM_IAS=1 $HOSTCC_ARGS \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
