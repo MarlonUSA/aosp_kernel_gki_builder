@@ -63,9 +63,13 @@ jobs:
 
         make $MAKE_ARGS olddefconfig 2>&1 | tail -2
 
-        # 编译 — 不用 tail 吞错误，直接看最后 20 行
+        # 编译 — 全部日志输出到文件，不吞错误
         echo "=== Building kernel ==="
-        make $MAKE_ARGS Image modules -j$(nproc) 2>&1 | tail -20
+        make $MAKE_ARGS Image modules -j$(nproc) > /tmp/build.log 2>&1 || true
+        echo "=== Last 50 lines ==="
+        tail -50 /tmp/build.log
+        echo "=== Errors ==="
+        grep -iE "error:|fatal:|cannot|undefined" /tmp/build.log | head -20
 
         echo "=== Check results ==="
         ls -lh arch/arm64/boot/Image 2>/dev/null && echo "Image OK" || echo "Image FAILED"
