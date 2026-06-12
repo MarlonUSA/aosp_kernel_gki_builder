@@ -1,6 +1,10 @@
-name: "🔒 HOOK CAF-SM8650 (8Gen3 syscall600)"
+name: "🔒 HOOK CAF-SM8650 (Cached)"
 on:
   workflow_dispatch:
+  push:
+    branches: [ci]
+    paths:
+      - '.github/workflows/build-hook-caf-sm8650.yml'
 
 jobs:
   build:
@@ -8,7 +12,7 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    name: "Build Hook SM8650"
+    name: "Build Hook SM8650 (with cache)"
 
     steps:
     - name: Checkout
@@ -28,13 +32,35 @@ jobs:
           git curl ccache zip unzip python3 cpio kmod dwarves libncurses-dev || true
         mkdir -p $GITHUB_WORKSPACE/build
 
+    # ============================================================
+    # 缓存 1: 内核源码 (固定 commit, 不变)
+    # ============================================================
+    - name: Cache kernel source
+      id: cache-src
+      uses: actions/cache@v4
+      with:
+        path: build/kernel_src
+        key: kernel-src-sm8650-6.1.r24-v1
+
     - name: Download CAF SM8650 kernel source
+      if: steps.cache-src.outputs.cache-hit != 'true'
       run: |
         cd $GITHUB_WORKSPACE/build
         git clone --depth=1 --branch kernel.lnx.6.1.r24-rel \
           https://git.codelinaro.org/clo/la/kernel/qcom.git kernel_src 2>&1 | tail -3
 
+    # ============================================================
+    # 缓存 2: Clang 工具链
+    # ============================================================
+    - name: Cache Clang toolchain
+      id: cache-clang
+      uses: actions/cache@v4
+      with:
+        path: build/clang
+        key: clang-android14-r487747c-v1
+
     - name: Download Android Clang 17
+      if: steps.cache-clang.outputs.cache-hit != 'true'
       run: |
         cd $GITHUB_WORKSPACE/build
         mkdir -p clang
@@ -42,7 +68,26 @@ jobs:
           | tar xz -C clang
         echo "Clang: $(clang/bin/clang --version | head -1)"
 
+    # ============================================================
+    # 缓存 3: 完整内核构建产物 (Image + modules + Module.symvers)
+    # key 包含 .config 哈希 — 内核配置变了就重建
+    # ============================================================
+    - name: Cache kernel build artifacts
+      id: cache-build
+      uses: actions/cache@v4
+      with:
+        path: |
+          build/kernel_src/Module.symvers
+          build/kernel_src/vmlinux
+          build/kernel_src/.config
+          build/kernel_src/include/config
+          build/kernel_src/include/generated
+          build/kernel_src/arch/arm64/include/generated
+          build/kernel_src/scripts
+        key: kernel-build-sm8650-6.1.r24-gki-v3
+
     - name: Configure kernel
+      if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
@@ -65,7 +110,8 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           olddefconfig 2>&1 | tail -1
 
-    - name: Build full kernel (Image + modules)
+    - name: Build full kernel (only if cache miss)
+      if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
@@ -75,18 +121,30 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           Image modules -j$(nproc) 2>&1 | tail -5
 
-    - name: Build Hook driver (syscall 600)
+    - name: Build cache info
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel_src
+        echo "=== Module.symvers exists: $(test -f Module.symvers && echo YES || echo NO) ==="
+        echo "=== vmlinux exists: $(test -f vmlinux && echo YES || echo NO) ==="
+        echo "=== Cache hit: ${{ steps.cache-build.outputs.cache-hit }} ==="
+        ls -la Module.symvers vmlinux 2>/dev/null || true
+
+    # ============================================================
+    # 编译我们的驱动模块 (无缓存, 每次都编 — 但只要几秒)
+    # ============================================================
+    - name: Build Hook driver
       run: |
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
 
+        # 总是 clone 最新源码
+        rm -rf $GITHUB_WORKSPACE/build/TearGame
         git clone --depth=1 https://github.com/MarlonUSA/TearGame_KernelDriver_Android_WriteReadMemory.git \
           $GITHUB_WORKSPACE/build/TearGame
 
         MODDIR=$GITHUB_WORKSPACE/build/hook_mod
         mkdir -p $MODDIR
 
-        # 用 hook/ 目录的源码 (syscall 600 版)
         cp $GITHUB_WORKSPACE/build/TearGame/hook/*.c $MODDIR/
         cp $GITHUB_WORKSPACE/build/TearGame/hook/*.h $MODDIR/
         echo "obj-m := usa_hook.o" > $MODDIR/Makefile
