@@ -1,0 +1,94 @@
+name: "Build 6.12 GKI (Android 16)"
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    name: "Build android16-6.12"
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup environment
+      run: |
+        sudo swapoff -a
+        sudo fallocate -l 16G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache 2>/dev/null
+        sudo docker image prune --all -f 2>/dev/null || true
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+          git curl ccache zip unzip python3 cpio kmod dwarves libncurses-dev lld clang || true
+        mkdir -p $GITHUB_WORKSPACE/build
+
+    - name: Download kernel source
+      run: |
+        cd $GITHUB_WORKSPACE/build
+        git clone --depth=1 --branch android16-6.12 \
+          https://android.googlesource.com/kernel/common kernel_src 2>&1 | tail -3
+
+    - name: Download Clang 20
+      run: |
+        cd $GITHUB_WORKSPACE/build
+        mkdir -p clang
+        curl -sL "https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20241217-release/Clang-20.0.0git-20241217.tar.gz" \
+          | tar xz -C clang
+        echo "Clang: $(clang/bin/clang --version | head -1)"
+
+    - name: Configure kernel
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel_src
+        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
+
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+          gki_defconfig 2>&1 | tail -2
+
+        scripts/config --enable CONFIG_MODULES
+        scripts/config --enable CONFIG_MODULE_UNLOAD
+        scripts/config --enable CONFIG_KPROBES
+        scripts/config --disable CONFIG_TRIM_UNUSED_KSYMS
+        touch abi_symbollist.raw
+
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+          olddefconfig 2>&1 | tail -1
+
+    - name: Build full kernel
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel_src
+        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+          Image modules -j$(nproc) 2>&1 | tail -10
+
+    - name: Clone and build TearGame .ko
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel_src
+        export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
+        git clone --depth=1 https://github.com/MarlonUSA/TearGame_KernelDriver_Android_WriteReadMemory.git \
+          $GITHUB_WORKSPACE/build/TearGame
+        MODDIR=$GITHUB_WORKSPACE/build/teargame_mod
+        mkdir -p $MODDIR
+        cp $GITHUB_WORKSPACE/build/TearGame/dev/*.c $MODDIR/
+        cp $GITHUB_WORKSPACE/build/TearGame/dev/*.h $MODDIR/
+        echo "obj-m := usa_drv.o" > $MODDIR/Makefile
+        echo "usa_drv-objs := entry.o memory.o process.o" >> $MODDIR/Makefile
+        echo "Source files:" && ls $MODDIR/
+        make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
+          ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+          KBUILD_MODPOST_WARN=1 modules 2>&1 | tail -8
+        mkdir -p $GITHUB_WORKSPACE/build/output
+        find $MODDIR -name "*.ko" -exec cp {} $GITHUB_WORKSPACE/build/output/TearGame_6.12-gki.ko \;
+        ls -lh $GITHUB_WORKSPACE/build/output/ || echo "No .ko"
+
+    - name: Upload .ko
+      uses: actions/upload-artifact@v4
+      with:
+        name: TearGame-6.12-gki
+        path: build/output/*.ko
+        if-no-files-found: warn
