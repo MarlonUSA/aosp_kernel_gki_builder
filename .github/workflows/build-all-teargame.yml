@@ -184,10 +184,8 @@ jobs:
         ls $MODDIR/*.c 2>/dev/null || echo "No .c files!"
 
         # 写 Makefile (多文件编译)
-        cat > $MODDIR/Makefile << 'MKEOF'
-obj-m := usa_drv.o
-usa_drv-objs := entry.o memory.o process.o
-MKEOF
+        echo "obj-m := usa_drv.o" > $MODDIR/Makefile
+        echo "usa_drv-objs := entry.o memory.o process.o" >> $MODDIR/Makefile
 
         make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
           ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \

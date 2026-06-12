@@ -118,10 +118,8 @@ jobs:
         mkdir -p $MODDIR
         cp $GITHUB_WORKSPACE/build/TearGame/dev/*.c $MODDIR/
         cp $GITHUB_WORKSPACE/build/TearGame/dev/*.h $MODDIR/
-        cat > $MODDIR/Makefile << 'MKEOF'
-obj-m := usa_drv.o
-usa_drv-objs := entry.o memory.o process.o
-MKEOF
+        echo "obj-m := usa_drv.o" > $MODDIR/Makefile
+        echo "usa_drv-objs := entry.o memory.o process.o" >> $MODDIR/Makefile
         echo "Source files:" && ls $MODDIR/
         make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
           ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
