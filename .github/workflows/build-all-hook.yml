@@ -73,7 +73,7 @@ jobs:
             repo: "https://git.codelinaro.org/clo/la/kernel/msm-5.4.git"
             clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
 
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     name: "Build ${{ matrix.tag }}"
 
@@ -95,7 +95,7 @@ jobs:
 
         # swap
         sudo swapoff -a
-        sudo fallocate -l 4G /swapfile
+        sudo fallocate -l 16G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
@@ -105,7 +105,18 @@ jobs:
           git curl ccache zip unzip python3 cpio kmod dwarves libncurses-dev libdw-dev || true
         mkdir -p $GITHUB_WORKSPACE/build
 
+    # ============================================================
+    # 缓存 1: 内核源码
+    # ============================================================
+    - name: Cache kernel source
+      id: cache-src
+      uses: actions/cache@v4
+      with:
+        path: build/kernel_src
+        key: kernel-src-${{ matrix.version }}-${{ matrix.branch }}-v1
+
     - name: Download kernel source
+      if: steps.cache-src.outputs.cache-hit != 'true'
       run: |
         cd $GITHUB_WORKSPACE/build
         echo "Cloning kernel ${{ matrix.tag }} from ${{ matrix.repo }}..."
@@ -116,14 +127,43 @@ jobs:
           git clone --depth=1 ${{ matrix.repo }} kernel_src 2>&1 | tail -3
         fi
 
+    # ============================================================
+    # 缓存 2: Clang 工具链
+    # ============================================================
+    - name: Cache Clang toolchain
+      id: cache-clang
+      uses: actions/cache@v4
+      with:
+        path: build/clang
+        key: clang-${{ matrix.version }}-${{ hashFiles('.github/workflows/build-all-hook.yml') }}-v1
+
     - name: Download Android Clang
+      if: steps.cache-clang.outputs.cache-hit != 'true'
       run: |
         cd $GITHUB_WORKSPACE/build
         mkdir -p clang
         curl -sL "${{ matrix.clang_url }}" | tar xz -C clang
         echo "Clang: $(clang/bin/clang --version | head -1)"
 
+    # ============================================================
+    # 缓存 3: 完整内核构建产物 (Module.symvers + vmlinux + 生成的 headers)
+    # ============================================================
+    - name: Cache kernel build artifacts
+      id: cache-build
+      uses: actions/cache@v4
+      with:
+        path: |
+          build/kernel_src/Module.symvers
+          build/kernel_src/vmlinux
+          build/kernel_src/.config
+          build/kernel_src/include/config
+          build/kernel_src/include/generated
+          build/kernel_src/arch/arm64/include/generated
+          build/kernel_src/scripts
+        key: kernel-build-${{ matrix.version }}-${{ matrix.branch }}-v3
+
     - name: Configure kernel
+      if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
@@ -160,7 +200,8 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           olddefconfig 2>&1 | tail -1
 
-    - name: Build kernel (Image + modules)
+    - name: Build kernel (Image + modules) — only if cache miss
+      if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
@@ -178,6 +219,14 @@ jobs:
 
         echo "Disk after build:"
         df -h / | tail -1
+
+    - name: Cache info
+      run: |
+        cd $GITHUB_WORKSPACE/build/kernel_src
+        echo "=== Cache hit (src):    ${{ steps.cache-src.outputs.cache-hit }} ==="
+        echo "=== Cache hit (clang):  ${{ steps.cache-clang.outputs.cache-hit }} ==="
+        echo "=== Cache hit (build):  ${{ steps.cache-build.outputs.cache-hit }} ==="
+        echo "Module.symvers: $(test -f Module.symvers && stat -c %s Module.symvers || echo MISSING)"
 
     - name: Clone TearGame driver
       run: |
@@ -228,7 +277,7 @@ jobs:
   package:
     needs: build
     if: always()
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     name: "Package Loader"
     permissions:
       contents: write
