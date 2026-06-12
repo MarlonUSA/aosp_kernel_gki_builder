@@ -46,7 +46,7 @@ jobs:
             config: "gki_defconfig"
             tag: "android16-6.12"
             repo: "https://android.googlesource.com/kernel/common"
-            clang_url: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567c.tar.gz"
+            clang_url: "https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20241217-release/Clang-20.0.0git-20241217.tar.gz"
           # ===== CAF 骁龙专属 =====
           - version: "6.1-sm8650"
             branch: "kernel.lnx.6.1.r24-rel"
@@ -127,7 +127,7 @@ jobs:
           DEFCONFIG=defconfig
         fi
 
-        make ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
@@ -139,7 +139,7 @@ jobs:
         scripts/config --disable CONFIG_TRIM_UNUSED_KSYMS
         touch abi_symbollist.raw
 
-        make ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
@@ -150,7 +150,7 @@ jobs:
         cd $GITHUB_WORKSPACE/build/kernel_src
         export PATH=$GITHUB_WORKSPACE/build/clang/bin:$PATH
 
-        make ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
@@ -188,7 +188,7 @@ jobs:
         echo "usa_drv-objs := entry.o memory.o process.o" >> $MODDIR/Makefile
 
         make -C $GITHUB_WORKSPACE/build/kernel_src M=$MODDIR \
-          ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTCXX=g++ \
+          ARCH=arm64 LLVM=1 LLVM_IAS=1 HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip OBJDUMP=llvm-objdump \
           CROSS_COMPILE=aarch64-linux-gnu- \
